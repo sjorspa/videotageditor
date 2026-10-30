@@ -11,10 +11,11 @@ import cv2
 import numpy as np
 from PIL import Image, ImageFilter
 
-from PySide6.QtCore import QPointF, QProcess, QRectF, QSettings, Qt, QThread, QUrl, Signal
+from PySide6.QtCore import QEvent, QObject, QPointF, QProcess, QRectF, QSettings, Qt, QThread, QTimer, QUrl, Signal
 from PySide6.QtGui import QColor, QGuiApplication, QImage, QPainter, QPen
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer, QVideoSink
 from PySide6.QtWidgets import (
+    QAbstractSpinBox,
     QApplication,
     QCheckBox,
     QComboBox,
@@ -81,6 +82,20 @@ def bgr_to_qimage(arr: np.ndarray) -> QImage:
     rgb = np.ascontiguousarray(cv2.cvtColor(arr, cv2.COLOR_BGR2RGB))
     h, w = rgb.shape[:2]
     return QImage(rgb.data, w, h, 3 * w, QImage.Format_RGB888).copy()
+
+
+class SelectAllOnFocus(QObject):
+    """Select a spin box's whole value when it gets focus, so typing replaces it.
+
+    Otherwise a click puts the cursor inside the number and digits get appended
+    ("120" + "80" = "12080"), which the range validator silently rejects.
+    """
+
+    def eventFilter(self, obj, ev):
+        if ev.type() == QEvent.FocusIn and ev.reason() in (Qt.MouseFocusReason, Qt.TabFocusReason,
+                                                            Qt.BacktabFocusReason, Qt.ShortcutFocusReason):
+            QTimer.singleShot(0, obj.selectAll)  # after the click has placed the cursor
+        return False
 
 
 def save_widget(st: QSettings, key: str, w):
@@ -719,6 +734,9 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self.tabs)
         self.last_open_dir = Path.home()
         self.restore_settings()
+        self._select_all = SelectAllOnFocus(self)
+        for sb in self.findChildren(QAbstractSpinBox):
+            sb.installEventFilter(self._select_all)
         self.set_enabled(False)
 
     # --- general ----------------------------------------------------------
