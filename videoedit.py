@@ -953,7 +953,7 @@ class MainWindow(QMainWindow):
         self._segment_mode = True
 
     # --- segment sliders ---------------------------------------------------
-    _seg_len = 0  # segment length the start keeps while dragging the end
+    _seg_len = 0  # segment length set with the sliders, kept when dragging the playhead
 
     def locked_ms(self) -> int | None:
         if not self.lock_chk.isChecked():
@@ -987,8 +987,9 @@ class MainWindow(QMainWindow):
                 self.end_slider.blockSignals(False)
             self._set_quiet(self.start_slider, v - lock)
         else:
-            # start follows the end, keeping the segment length
-            self._set_quiet(self.start_slider, max(v - self._seg_len, 0))
+            if v < self.start_slider.value():
+                self._set_quiet(self.start_slider, v)
+            self._seg_len = v - self.start_slider.value()
         if self.end_slider.isSliderDown():
             self.player.setPosition(v)
         self.update_seg_labels()

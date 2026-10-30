@@ -15,8 +15,8 @@ The app has five tabs: **Editor**, **Combine**, **Video Tagger**, **Image Tagger
 - **Open a video** (Ctrl+O), **import from a URL** (Ctrl+U) via yt-dlp from
   thousands of sites, or open a file directly: `./start.sh video.mp4`.
 - **Segment selection** with Start and End sliders.
-  - Dragging the playhead moves the segment start along.
-  - Dragging End moves Start along, so the segment keeps its length.
+  - Start and End move independently; one only pushes the other when they meet.
+  - Dragging the playhead moves the segment start to it; End follows, keeping the length.
   - **Fixed duration**: lock the segment to e.g. 15 seconds; both sliders move together.
   - Play or loop just the segment.
 - **Cut out selection**: remove the selected part and join what comes before
