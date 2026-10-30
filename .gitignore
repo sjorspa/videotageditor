@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+*.pyc
+# downloaded on first use (faceblur.ensure_model)
+models/
+*.part
