@@ -2,10 +2,10 @@
 
 A small desktop video editor for Linux, written in Python (PySide6 + ffmpeg).
 It is built for quickly turning raw footage into short, cropped clips, and for
-preparing video datasets: combining clips, captioning them with a local vision
-model in LM Studio, and resizing whole folders at once.
+preparing datasets: combining clips, captioning videos and images with a local
+vision model in LM Studio, and resizing whole folders at once.
 
-The app has four tabs: **Editor**, **Combine**, **Tagger** and **Batch**.
+The app has five tabs: **Editor**, **Combine**, **Video Tagger**, **Image Tagger** and **Batch**.
 
 ![Editor](docs/editor.png)
 
@@ -32,7 +32,7 @@ The app has four tabs: **Editor**, **Combine**, **Tagger** and **Batch**.
 - **Export** the selected segment to MP4/MKV/MOV (H.264 + AAC) with crop and
   blur applied, an adjustable frame rate (default 24 fps), with or without
   audio, with a progress bar and cancel button.
-- **Tag current video** (Ctrl+T): describe the loaded video with the Tagger
+- **Tag current video** (Ctrl+T): describe the loaded video with the Video Tagger
   settings and save it as a `.txt` file next to it. For a cut or combined
   video, the file goes next to the default export (`<name>_edit.txt`).
 
@@ -46,8 +46,8 @@ The app has four tabs: **Editor**, **Combine**, **Tagger** and **Batch**.
 - The joined video is a temporary file; exports from it default to the folder
   of the first video.
 
-### Tagger
-![Tagger](docs/tagger.png)
+### Video Tagger
+![Video Tagger](docs/tagger.png)
 
 Writes a description of every video in a folder to a `.txt` file with the same
 name (`clip.mp4` → `clip.txt`), for example to caption a training dataset.
@@ -64,6 +64,17 @@ name (`clip.mp4` → `clip.txt`), for example to caption a training dataset.
   optional **thinking** mode for reasoning models.
 - Skips videos that already have a `.txt` file, unless you choose to overwrite.
   Can include subfolders.
+
+### Image Tagger
+![Image Tagger](docs/image_tagger.png)
+
+The same as the Video Tagger, but for images (JPG, PNG, WebP, BMP, GIF, TIFF),
+with its own prompt and its own remembered settings.
+
+- Each image is sent once, scaled to the chosen **image size**. Photos are turned
+  upright using their EXIF orientation, and transparent areas become white.
+- Model, context, prefix, max words, thinking, subfolders and overwrite work
+  exactly as in the Video Tagger.
 
 ### Batch
 ![Batch](docs/batch.png)
@@ -156,7 +167,7 @@ Then press Super, search for **Video Editor**, right-click it and choose
 |------|----------|
 | `videoedit.py` | Main window, editor tab, export, cut/undo, settings |
 | `combine.py` | Combine tab |
-| `tagger.py` | Tagger tab and LM Studio integration |
+| `tagger.py` | Video and Image Tagger tabs, LM Studio integration |
 | `batch.py` | Batch resize tab |
 | `faceblur.py` | Face detection, tracking and blurring |
 | `start.sh` | Creates the virtual environment on first run and starts the app |

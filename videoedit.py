@@ -729,8 +729,10 @@ class MainWindow(QMainWindow):
         self.tabs = QTabWidget()
         self.tabs.addTab(central, "Editor")
         self.tabs.addTab(self.combine, "Combine")
-        self.tagger = TaggerTab()
-        self.tabs.addTab(self.tagger, "Tagger")
+        self.tagger = TaggerTab("video")
+        self.tabs.addTab(self.tagger, "Video Tagger")
+        self.img_tagger = TaggerTab("image")
+        self.tabs.addTab(self.img_tagger, "Image Tagger")
         self.batch = BatchTab()
         self.tabs.addTab(self.batch, "Batch")
         self.tabs.currentChanged.connect(self.on_tab_changed)
@@ -766,6 +768,7 @@ class MainWindow(QMainWindow):
             "blur/enabled": self.blur_chk, "blur/type": self.blur_type, "blur/strength": self.blur_strength,
             "blur/passes": self.blur_passes,
             **self.tagger.persist_widgets(),
+            **self.img_tagger.persist_widgets(),
             **self.batch.persist_widgets(),
         }
 
@@ -778,8 +781,9 @@ class MainWindow(QMainWindow):
                 setattr(self, attr, Path(d))
         if (d := st.value("dirs/combine")) and Path(d).is_dir():
             self.combine.last_dir = Path(d)
-        self.tagger.preferred_model = st.value("tagger/model", "") or ""
-        self.tagger.after_restore()
+        for t in (self.tagger, self.img_tagger):
+            t.preferred_model = st.value(f"{t.cfg['key']}/model", "") or ""
+            t.after_restore()
         if geo := st.value("window/geometry"):
             self.restoreGeometry(geo)
         self.tabs.setCurrentIndex(int(st.value("window/tab", 0) or 0))
@@ -791,13 +795,15 @@ class MainWindow(QMainWindow):
         st.setValue("dirs/open", str(self.last_open_dir))
         st.setValue("dirs/download", str(self.download_dir))
         st.setValue("dirs/combine", str(self.combine.last_dir))
-        st.setValue("tagger/model", self.tagger.current_model())
+        for t in (self.tagger, self.img_tagger):
+            st.setValue(f"{t.cfg['key']}/model", t.current_model())
         st.setValue("window/geometry", self.saveGeometry())
         st.setValue("window/tab", self.tabs.currentIndex())
 
     def on_tab_changed(self, idx: int):
-        if self.tabs.widget(idx) is self.tagger and self.tagger.model_combo.count() == 0:
-            self.tagger.refresh_models()
+        tab = self.tabs.widget(idx)
+        if isinstance(tab, TaggerTab) and tab.model_combo.count() == 0:
+            tab.refresh_models()
 
     # --- import from URL (yt-dlp) ----------------------------------------------
     def import_url(self):
@@ -860,6 +866,7 @@ class MainWindow(QMainWindow):
     def closeEvent(self, e):
         self.save_settings()
         self.tagger.shutdown()
+        self.img_tagger.shutdown()
         self.batch.shutdown()
         self.combine.cleanup()
         if self.temp_dir:

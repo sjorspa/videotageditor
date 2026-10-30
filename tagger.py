@@ -1,7 +1,8 @@
-"""Tagger tab: describe every video in a folder with a vision model in LM Studio,
-writing the description to a .txt file with the same name next to the video."""
+"""Tagger tabs: describe every video (or image) in a folder with a vision model in
+LM Studio, writing the description to a .txt file with the same name next to it."""
 
 import base64
+import io
 import json
 import shutil
 import subprocess
@@ -9,6 +10,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from PIL import Image, ImageOps
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -39,6 +41,18 @@ DEFAULT_PROMPT = (
 )
 # the first default asked for "one detailed paragraph", which fights a short word limit
 OLD_DEFAULT_PROMPT = DEFAULT_PROMPT.replace("as one paragraph", "in one detailed paragraph")
+DEFAULT_IMAGE_PROMPT = (
+    "Describe this image as one paragraph: the subjects and their appearance, what they are doing, "
+    "the setting, the composition, the lighting and the style of the image. "
+    "Output only the description."
+)
+IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tif", ".tiff"}
+
+# per tab: settings prefix, what the files are called, which files, default prompt
+KINDS = {
+    "video": {"key": "tagger", "noun": "video", "exts": VIDEO_EXTS, "prompt": DEFAULT_PROMPT},
+    "image": {"key": "imgtagger", "noun": "image", "exts": IMAGE_EXTS, "prompt": DEFAULT_IMAGE_PROMPT},
+}
 
 
 def lms_path() -> str | None:
@@ -175,6 +189,22 @@ def chat(server: str, model: str, content, thinking: bool, max_tokens: int) -> s
     return " ".join(text.split())
 
 
+def image_frame(path: str, max_side: int) -> list[bytes]:
+    """The image as one JPEG, upright and no larger than `max_side`."""
+    with Image.open(path) as im:
+        im = ImageOps.exif_transpose(im)
+        if im.mode in ("RGBA", "LA", "P"):
+            im = im.convert("RGBA")
+            bg = Image.new("RGB", im.size, "white")  # transparent areas on white, not black
+            bg.paste(im, mask=im.getchannel("A"))
+            im = bg
+        im = im.convert("RGB")
+        im.thumbnail((max_side, max_side))
+        buf = io.BytesIO()
+        im.save(buf, "JPEG", quality=90)
+    return [buf.getvalue()]
+
+
 def describe(server: str, model: str, prompt: str, frames: list[bytes], thinking: bool, max_words: int) -> str:
     # models only roughly follow a word count; a range works best
     content = [{"type": "text", "text": f"{prompt}\n\nLength requirement: {max(1, round(max_words * 0.75))}-{max_words} words."}]
@@ -187,7 +217,7 @@ def describe(server: str, model: str, prompt: str, frames: list[bytes], thinking
     if len(text.split()) > max_words:
         # too long: let the model shorten its own text (cheap, no images), trim_words() is the last resort
         target = max(3, round(max_words * 0.8))  # aim lower: the model tends to overshoot
-        shorter = chat(server, model, f"Shorten this video description to at most {target} words, keeping "
+        shorter = chat(server, model, f"Shorten this description to at most {target} words, keeping "
                        f"the most important details and complete sentences. Output only the shortened "
                        f"description.\n\n{text}", thinking, max_words * 3 + 100)
         text = shorter or text
@@ -220,10 +250,10 @@ class TagWorker(QThread):
     described = Signal(str, str)  # .txt path, description
 
     def __init__(self, parent, server, model, prompt, prefix, videos, frames, max_side, thinking, max_words,
-                 context, targets=None):
+                 context, targets=None, kind="video"):
         super().__init__(parent)
-        self.max_words, self.context = max_words, context
-        self.targets = targets or {}  # video -> .txt path, default: next to the video
+        self.max_words, self.context, self.kind = max_words, context, kind
+        self.targets = targets or {}  # file -> .txt path, default: next to the file
         self.server, self.model, self.prompt, self.prefix = server, model, prompt, prefix
         self.videos, self.frames, self.max_side, self.thinking = videos, frames, max_side, thinking
         self.stopped = False
@@ -243,9 +273,9 @@ class TagWorker(QThread):
             self.progress.emit(n, len(self.videos))
             self.log.emit(f"▶ {video.name}")
             try:
-                text = describe(self.server, self.model, self.prompt,
-                                extract_frames(str(video), self.frames, self.max_side), self.thinking,
-                                self.max_words)
+                frames = (extract_frames(str(video), self.frames, self.max_side) if self.kind == "video"
+                          else image_frame(str(video), self.max_side))
+                text = describe(self.server, self.model, self.prompt, frames, self.thinking, self.max_words)
                 if self.prefix:
                     text = f"{self.prefix} {text}"
                 txt = self.targets.get(video, video.with_suffix(".txt"))
@@ -263,8 +293,10 @@ class TagWorker(QThread):
 
 
 class TaggerTab(QWidget):
-    def __init__(self):
+    def __init__(self, kind: str = "video"):
         super().__init__()
+        self.kind = kind
+        self.cfg = KINDS[kind]
         self.worker: TagWorker | None = None
         self.preferred_model = ""  # restored from settings, selected once the list arrives
 
@@ -308,7 +340,7 @@ class TaggerTab(QWidget):
         self.recursive_chk = QCheckBox("Include subfolders")
         self.overwrite_chk = QCheckBox("Overwrite existing .txt files")
 
-        self.prompt_edit = QPlainTextEdit(DEFAULT_PROMPT)
+        self.prompt_edit = QPlainTextEdit(self.cfg["prompt"])
         self.prompt_edit.setFixedHeight(90)
         self.prefix_edit = QLineEdit()
         self.prefix_edit.setPlaceholderText("optional, e.g. a trigger word – put in front of every description")
@@ -321,7 +353,7 @@ class TaggerTab(QWidget):
         self.size_spin.setSingleStep(64)
         self.size_spin.setValue(768)
         self.size_spin.setSuffix(" px")
-        self.size_spin.setToolTip("Longest side of each frame sent to the model")
+        self.size_spin.setToolTip(f"Longest side of each {'frame' if kind == 'video' else 'image'} sent to the model")
         self.words_spin = QSpinBox()
         self.words_spin.setRange(5, 1000)
         self.words_spin.setSingleStep(10)
@@ -331,9 +363,10 @@ class TaggerTab(QWidget):
         self.thinking_chk = QCheckBox("Thinking")
         self.thinking_chk.setToolTip("Let reasoning models think first: slower, sometimes more accurate")
         opts = QHBoxLayout()
-        opts.addWidget(QLabel("Frames"))
-        opts.addWidget(self.frames_spin)
-        opts.addWidget(QLabel("Frame size"))
+        if kind == "video":
+            opts.addWidget(QLabel("Frames"))
+            opts.addWidget(self.frames_spin)
+        opts.addWidget(QLabel("Frame size" if kind == "video" else "Image size"))
         opts.addWidget(self.size_spin)
         opts.addWidget(QLabel("Max words"))
         opts.addWidget(self.words_spin)
@@ -353,7 +386,7 @@ class TaggerTab(QWidget):
         form = QFormLayout()
         form.addRow("LM Studio server", self.server_edit)
         form.addRow("Model", model_row)
-        form.addRow("Video folder", folder_row)
+        form.addRow(f"{self.cfg['noun'].capitalize()} folder", folder_row)
         form.addRow("", self.recursive_chk)
         form.addRow("", self.overwrite_chk)
         form.addRow("Prompt", self.prompt_edit)
@@ -366,14 +399,17 @@ class TaggerTab(QWidget):
         v.addWidget(self.log_view, 1)
 
     def persist_widgets(self) -> dict:
-        return {"tagger/server": self.server_edit, "tagger/folder": self.folder_edit,
-                "tagger/recursive": self.recursive_chk, "tagger/overwrite": self.overwrite_chk,
-                "tagger/prompt": self.prompt_edit, "tagger/prefix": self.prefix_edit,
-                "tagger/context": self.ctx_spin, "tagger/frames": self.frames_spin, "tagger/size": self.size_spin, "tagger/words": self.words_spin,
-                "tagger/thinking": self.thinking_chk}
+        k = self.cfg["key"]
+        widgets = {"server": self.server_edit, "folder": self.folder_edit, "recursive": self.recursive_chk,
+                   "overwrite": self.overwrite_chk, "prompt": self.prompt_edit, "prefix": self.prefix_edit,
+                   "context": self.ctx_spin, "size": self.size_spin, "words": self.words_spin,
+                   "thinking": self.thinking_chk}
+        if self.kind == "video":
+            widgets["frames"] = self.frames_spin
+        return {f"{k}/{name}": w for name, w in widgets.items()}
 
     def after_restore(self):
-        if self.prompt_edit.toPlainText().strip() == OLD_DEFAULT_PROMPT:
+        if self.kind == "video" and self.prompt_edit.toPlainText().strip() == OLD_DEFAULT_PROMPT:
             self.prompt_edit.setPlainText(DEFAULT_PROMPT)
 
     def server(self) -> str:
@@ -460,36 +496,38 @@ class TaggerTab(QWidget):
 
     # --- run ----------------------------------------------------------------------
     def browse_folder(self):
-        d = QFileDialog.getExistingDirectory(self, "Video folder", self.folder_edit.text() or str(Path.home()))
+        d = QFileDialog.getExistingDirectory(self, f"{self.cfg['noun'].capitalize()} folder",
+                                             self.folder_edit.text() or str(Path.home()))
         if d:
             self.folder_edit.setText(d)
 
-    def videos(self) -> list[Path]:
+    def files(self) -> list[Path]:
         folder = Path(self.folder_edit.text()).expanduser()
-        files = folder.rglob("*") if self.recursive_chk.isChecked() else folder.iterdir()
-        vids = sorted(p for p in files if p.is_file() and p.suffix.lower() in VIDEO_EXTS)
+        found = folder.rglob("*") if self.recursive_chk.isChecked() else folder.iterdir()
+        files = sorted(p for p in found if p.is_file() and p.suffix.lower() in self.cfg["exts"])
         if not self.overwrite_chk.isChecked():
-            vids = [p for p in vids if not p.with_suffix(".txt").exists()]
-        return vids
+            files = [p for p in files if not p.with_suffix(".txt").exists()]
+        return files
 
     def start(self):
         if self.worker:
             self.worker.stopped = True
             self.start_btn.setEnabled(False)
-            self.start_btn.setText("Stopping after this video…")
+            self.start_btn.setText(f"Stopping after this {self.cfg['noun']}…")
             return
         model = self.current_model()
         if not model:
             QMessageBox.warning(self, "Tagger", "Choose a model first (is LM Studio running? Click Refresh).")
             return
         if not Path(self.folder_edit.text()).expanduser().is_dir():
-            QMessageBox.warning(self, "Tagger", "Choose an existing video folder.")
+            QMessageBox.warning(self, "Tagger", f"Choose an existing {self.cfg['noun']} folder.")
             return
-        videos = self.videos()
-        if not videos:
-            QMessageBox.information(self, "Tagger", "No videos to tag (all of them may already have a .txt file).")
+        files = self.files()
+        if not files:
+            QMessageBox.information(self, "Tagger", f"No {self.cfg['noun']}s to tag "
+                                    "(all of them may already have a .txt file).")
             return
-        self.start_worker(videos)
+        self.start_worker(files)
 
     def tag_file(self, video: Path, txt: Path) -> TagWorker | None:
         """Tag one video (from the editor) with the current settings, writing `txt`."""
@@ -499,7 +537,7 @@ class TaggerTab(QWidget):
         if not self.current_model():
             self.refresh_models()
         if not self.current_model():
-            QMessageBox.warning(self, "Tagger", "Choose a model in the Tagger tab first (is LM Studio running?).")
+            QMessageBox.warning(self, "Tagger", "Choose a model in the Video Tagger tab first (is LM Studio running?).")
             return None
         return self.start_worker([video], {video: txt})
 
@@ -507,12 +545,13 @@ class TaggerTab(QWidget):
         model = self.current_model()
         self.preferred_model = model
         self.log_view.clear()
-        self.log_view.appendPlainText(f"{len(videos)} video{'s' if len(videos) > 1 else ''} · model {model}"
+        noun = self.cfg["noun"] + ("s" if len(videos) > 1 else "")
+        self.log_view.appendPlainText(f"{len(videos)} {noun} · model {model}"
                                       " (LM Studio loads it on the first request if needed)")
         w = TagWorker(self, self.server(), model, self.prompt_edit.toPlainText().strip(),
                       self.prefix_edit.text().strip(), videos, self.frames_spin.value(),
                       self.size_spin.value(), self.thinking_chk.isChecked(), self.words_spin.value(),
-                      self.ctx_spin.value(), targets)
+                      self.ctx_spin.value(), targets, self.kind)
         w.log.connect(self.log_view.appendPlainText)
         w.progress.connect(lambda d, t: (self.progress.setRange(0, t), self.progress.setValue(d),
                                          self.status.setText(f"{d} / {t}")))
