@@ -42,6 +42,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from batch import BatchTab
 from combine import CombineTab, probe
 from faceblur import FaceBlurSettings, FaceDetector, FaceTracker, blur_faces
 from tagger import TaggerTab
@@ -730,6 +731,8 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.combine, "Combine")
         self.tagger = TaggerTab()
         self.tabs.addTab(self.tagger, "Tagger")
+        self.batch = BatchTab()
+        self.tabs.addTab(self.batch, "Batch")
         self.tabs.currentChanged.connect(self.on_tab_changed)
         self.setCentralWidget(self.tabs)
         self.last_open_dir = Path.home()
@@ -763,6 +766,7 @@ class MainWindow(QMainWindow):
             "blur/enabled": self.blur_chk, "blur/type": self.blur_type, "blur/strength": self.blur_strength,
             "blur/passes": self.blur_passes,
             **self.tagger.persist_widgets(),
+            **self.batch.persist_widgets(),
         }
 
     def restore_settings(self):
@@ -856,6 +860,7 @@ class MainWindow(QMainWindow):
     def closeEvent(self, e):
         self.save_settings()
         self.tagger.shutdown()
+        self.batch.shutdown()
         self.combine.cleanup()
         if self.temp_dir:
             shutil.rmtree(self.temp_dir, ignore_errors=True)

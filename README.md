@@ -2,7 +2,10 @@
 
 A small desktop video editor for Linux, written in Python (PySide6 + ffmpeg).
 It is built for quickly turning raw footage into short, cropped clips, and for
-captioning video datasets with a local vision model in LM Studio.
+preparing video datasets: combining clips, captioning them with a local vision
+model in LM Studio, and resizing whole folders at once.
+
+The app has four tabs: **Editor**, **Combine**, **Tagger** and **Batch**.
 
 ![Editor](docs/editor.png)
 
@@ -26,9 +29,12 @@ captioning video datasets with a local vision model in LM Studio.
   are tracked over time, so brief detection misses stay covered.
 - **Blur**: Gaussian or box blur of the whole frame, with strength and passes.
 - **Live preview** of crop, face blur and blur.
-- **Export** to MP4/MKV/MOV (H.264 + AAC) with an adjustable frame rate
-  (default 24 fps), with or without audio, with a progress bar and cancel button.
-- **Tag current video** (Ctrl+T): write a description of the loaded video to a `.txt` file.
+- **Export** the selected segment to MP4/MKV/MOV (H.264 + AAC) with crop and
+  blur applied, an adjustable frame rate (default 24 fps), with or without
+  audio, with a progress bar and cancel button.
+- **Tag current video** (Ctrl+T): describe the loaded video with the Tagger
+  settings and save it as a `.txt` file next to it. For a cut or combined
+  video, the file goes next to the default export (`<name>_edit.txt`).
 
 ### Combine
 ![Combine](docs/combine.png)
@@ -37,6 +43,8 @@ captioning video datasets with a local vision model in LM Studio.
 - Drag them into the right order, then **Done** joins them and opens the result in the editor.
 - Videos with a different size, frame rate or aspect ratio are scaled and
   letterboxed to match the first video. Clips without audio get silence.
+- The joined video is a temporary file; exports from it default to the folder
+  of the first video.
 
 ### Tagger
 ![Tagger](docs/tagger.png)
@@ -44,28 +52,57 @@ captioning video datasets with a local vision model in LM Studio.
 Writes a description of every video in a folder to a `.txt` file with the same
 name (`clip.mp4` → `clip.txt`), for example to caption a training dataset.
 
-- Uses a **vision model in LM Studio**. The model list is read from LM Studio,
-  or pick a `.gguf` file with **Choose file…**.
+- Uses a **vision model in LM Studio**. The model list is read from LM Studio
+  (loaded models are marked), or pick a `.gguf` file with **Choose file…**.
+- A number of frames is sampled evenly over each video and sent to the model
+  together with the prompt.
 - **Context** length (default 40K): the model is (re)loaded with exactly this
-  context. **Load model** / **Unload model** buttons manage GPU memory.
+  context before tagging. Set it to **Auto** to leave it to LM Studio.
+  **Load model** / **Unload model** buttons manage GPU memory.
 - Editable **prompt**, optional **prefix** (e.g. a trigger word), number of
   **frames** per video, **frame size**, **max words** per description, and an
   optional **thinking** mode for reasoning models.
 - Skips videos that already have a `.txt` file, unless you choose to overwrite.
   Can include subfolders.
 
+### Batch
+![Batch](docs/batch.png)
+
+Resizes every video in a folder in one go, for example to prepare a dataset.
+
+- **Size modes**: fit within W×H, a fixed width or height (the other side
+  follows), a percentage, or an exact W×H by cropping to fill or by padding.
+- **Remove audio**, optionally **allow upscaling**, include subfolders (the
+  folder structure is kept in the output).
+- The exact sizes always scale to fit, up or down; the other modes keep
+  smaller videos at their size unless upscaling is allowed.
+- Matching `.txt` caption files are copied along, so tagged datasets stay intact.
+- Output is H.264 MP4 in a separate folder (default `<folder>/resized`), so the
+  originals are never overwritten. Finished files are skipped on a rerun.
+
 ### General
 - All settings, folders, the window size and the last tab are **remembered
   between sessions** (`~/.config/videoedit/videoedit.conf`).
 - Temporary files from cutting and combining are cleaned up on exit.
+
+### Keyboard shortcuts
+
+| Key | Action |
+|-----|--------|
+| Ctrl+O | Open video |
+| Ctrl+U | Import from URL |
+| Ctrl+T | Tag current video |
+| Ctrl+Z | Undo cut |
+| Space | Play / pause |
+| Delete | Remove selected videos (Combine tab) |
 
 ## Requirements
 
 - Linux (developed on Ubuntu)
 - Python 3.10 or newer
 - ffmpeg and ffprobe on your `PATH` (`sudo apt install ffmpeg`)
-- Optional, for the tagger: [LM Studio](https://lmstudio.ai) with the local
-  server enabled and a vision-capable model downloaded
+- Optional, for the tagger: a recent [LM Studio](https://lmstudio.ai) with
+  the local server enabled and a vision-capable model downloaded
 
 Python packages (installed automatically by `start.sh`): PySide6, Pillow,
 OpenCV (headless), yt-dlp. The face detection model (YuNet, about 230 KB) is
@@ -120,6 +157,7 @@ Then press Super, search for **Video Editor**, right-click it and choose
 | `videoedit.py` | Main window, editor tab, export, cut/undo, settings |
 | `combine.py` | Combine tab |
 | `tagger.py` | Tagger tab and LM Studio integration |
+| `batch.py` | Batch resize tab |
 | `faceblur.py` | Face detection, tracking and blurring |
 | `start.sh` | Creates the virtual environment on first run and starts the app |
 | `icon.svg` | App icon |
